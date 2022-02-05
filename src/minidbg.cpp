@@ -13,9 +13,13 @@
 #include <iostream>
 
 #include "linenoise.h"
+
 #include "debugger.hpp"
+#include <sys/personality.h>
 
 using namespace minidbg;
+
+
 
 //根据delimiter分割s，返回string的vector
 std::vector<std::string> split(const std::string &s, char delimiter)
@@ -39,6 +43,35 @@ bool is_prefix(const std::string& s, const std::string& of)
     return std::equal(s.begin(), s.end(), of.begin());
 }
 
+
+void debugger::handle_command(const std::string& line)
+{
+    auto args = split(line,' ');
+    auto command = args[0];
+
+    if(is_prefix(command, "continue"))
+    {
+        continue_execution();
+    }
+    else if(is_prefix(command, "break"))
+    {
+        std::string addr{args[1],2};//从args[1]的第2索引开始取值（相当于删除字符串前两个字符0x）
+        set_breakpoint_at_address(std::stol(addr,0,16));//地址格式由字符串转16进制数
+    }
+    else
+    {
+        std::cerr << "Unknown command\n";
+    }
+}
+
+void debugger::set_breakpoint_at_address(std::intptr_t addr)
+    {
+        std::cout << "Set breakpoint at address 0x" << std::hex << addr << std::endl;
+        breakpoint bp(m_pid, addr);
+        bp.enable();
+        m_breakpoints[addr] = bp;
+    }
+
 void debugger::run()
 {
     int wait_status;
@@ -54,20 +87,6 @@ void debugger::run()
     }
 }
 
-void debugger::handle_command(const std::string& line)
-{
-    auto args = split(line,' ');
-    auto command = args[0];
-
-    if(is_prefix(command, "continue"))
-    {
-        continue_execution();
-    }
-    else
-    {
-        std::cerr << "Unknown command\n";
-    }
-}
 
 void debugger::continue_execution()
 {
@@ -97,6 +116,10 @@ int main(int argc, char* argv[])
     {
         //we are in the child process
         //execute debugee
+        
+        //禁用地址空间布局随机化ASLR
+        personality(ADDR_NO_RANDOMIZE);
+
         ptrace(PTRACE_TRACEME, 0, nullptr, nullptr);//系统调用：让父进程跟踪子进程，父进程通过读取寄存器、读取内存、单步执行等方式来观察和控制子进程的执行。arg1表示我们想做什么（PTACRE_TRACEME指定父进程来跟踪它），arg2表示被跟踪的进程ID
         execl(prog, prog, nullptr);
 
