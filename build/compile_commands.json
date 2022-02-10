@@ -1,0 +1,27 @@
+[
+{
+  "directory": "/home/wendy/Desktop/WendyDebugger/build",
+  "command": "/usr/bin/x86_64-linux-gnu-g++-5    -I/home/wendy/Desktop/WendyDebugger/ext/libelfin -I/home/wendy/Desktop/WendyDebugger/ext/linenoise -I/home/wendy/Desktop/WendyDebugger/include  -g   -g -O0 -std=c++14 -o CMakeFiles/hello.dir/examples/hello.cpp.o -c /home/wendy/Desktop/WendyDebugger/examples/hello.cpp",
+  "file": "/home/wendy/Desktop/WendyDebugger/examples/hello.cpp"
+},
+{
+  "directory": "/home/wendy/Desktop/WendyDebugger/build",
+  "command": "/usr/bin/x86_64-linux-gnu-g++-5    -I/home/wendy/Desktop/WendyDebugger/ext/libelfin -I/home/wendy/Desktop/WendyDebugger/ext/linenoise -I/home/wendy/Desktop/WendyDebugger/include  -g   -std=c++14 -o CMakeFiles/minidbg.dir/src/minidbg.cpp.o -c /home/wendy/Desktop/WendyDebugger/src/minidbg.cpp",
+  "file": "/home/wendy/Desktop/WendyDebugger/src/minidbg.cpp"
+},
+{
+  "directory": "/home/wendy/Desktop/WendyDebugger/build",
+  "command": "/usr/bin/x86_64-linux-gnu-gcc-5   -I/home/wendy/Desktop/WendyDebugger/ext/libelfin -I/home/wendy/Desktop/WendyDebugger/ext/linenoise -I/home/wendy/Desktop/WendyDebugger/include  -g   -std=c++14 -o CMakeFiles/minidbg.dir/ext/linenoise/linenoise.c.o   -c /home/wendy/Desktop/WendyDebugger/ext/linenoise/linenoise.c",
+  "file": "/home/wendy/Desktop/WendyDebugger/ext/linenoise/linenoise.c"
+},
+{
+  "directory": "/home/wendy/Desktop/WendyDebugger/build",
+  "command": "/usr/bin/x86_64-linux-gnu-g++-5    -I/home/wendy/Desktop/WendyDebugger/ext/libelfin -I/home/wendy/Desktop/WendyDebugger/ext/linenoise -I/home/wendy/Desktop/WendyDebugger/include  -g   -g -O0 -std=c++14 -o CMakeFiles/unwinding.dir/examples/stack_unwinding.cpp.o -c /home/wendy/Desktop/WendyDebugger/examples/stack_unwinding.cpp",
+  "file": "/home/wendy/Desktop/WendyDebugger/examples/stack_unwinding.cpp"
+},
+{
+  "directory": "/home/wendy/Desktop/WendyDebugger/build",
+  "command": "/usr/bin/x86_64-linux-gnu-g++-5    -I/home/wendy/Desktop/WendyDebugger/ext/libelfin -I/home/wendy/Desktop/WendyDebugger/ext/linenoise -I/home/wendy/Desktop/WendyDebugger/include  -g   -gdwarf-2 -O0 -std=c++14 -o CMakeFiles/variable.dir/examples/variable.cpp.o -c /home/wendy/Desktop/WendyDebugger/examples/variable.cpp",
+  "file": "/home/wendy/Desktop/WendyDebugger/examples/variable.cpp"
+}
+]

@@ -12,6 +12,10 @@
 #include <sstream>
 #include <iostream>
 #include <iomanip>
+#include <fstream>
+
+#include <sys/types.h>
+#include <sys/stat.h>
 
 #include "linenoise.h"
 
@@ -21,27 +25,178 @@
 
 using namespace minidbg;
 
+// ptrace获取信号信息，如产生原因，返回存储相关信息的结构体
+siginfo_t debugger::get_signal_info()
+{
+    siginfo_t info;
+    ptrace(PTRACE_GETSIGINFO, m_pid, nullptr, &info);
+    return info;
+}
+
+
+// 打印源码上下文
+void debugger::print_source
+(const std::string& file_name, 
+unsigned line, unsigned n_line_context)
+{
+    std::ifstream file(file_name);
+
+    // 为了美化输出，画一些分割线
+    auto start_line = line <= n_line_context ? 1:line-n_line_context;
+    auto end_line = line + n_line_context 
+                    + (line < n_line_context ? n_line_context : 0) + 1;
+
+    char c{};
+    auto current_line = 1u;
+    // 跳过start_line前面的行，更新当前行
+    while(current_line != start_line && file.get(c))
+    {
+        if(c=='\n') ++current_line;
+    }
+
+    // 如果我们在当前行，则输出光标
+    std::cout << (current_line==line ? ">" : " ");
+
+    // 输出每一行，直到end_line
+    while(current_line <= end_line && file.get(c))
+    {
+        std::cout << c;
+        if(c == '\n')
+        {
+            ++current_line;
+            // 如果我们在当前行，则输出光标
+            std::cout << (current_line==line ? ">" : " ");
+        }
+    }
+    // 输出流刷新
+    std::cout << std::endl;
+}
+    
+
+
+
+//获取地址偏移
+ u_int64_t debugger::offset_load_address(u_int64_t addr)
+{
+    return addr - m_load_address;
+}
+
+
+//根据PC在debug_line表检索相关条目
+dwarf::line_table::iterator debugger::get_line_entry_from_pc(uint64_t pc)
+{
+    for(auto& cu: m_dwarf.compilation_units())//遍历所有编译单元
+    {
+        if(die_pc_range(cu.root()).contains(pc))
+        {
+            auto &lt = cu.get_line_table();//获取编译单元的.debug_line
+            auto it = lt.find_address(pc);//
+            if(it == lt.end())
+            {
+                throw std::out_of_range{"cannot find line entry"};
+            }
+            else
+            {
+                return it;
+            }
+        }
+    }
+    throw std::out_of_range{"cannot find line entry"};
+}
+
+//根据PC检索dwarf信息条目得到函数die
+dwarf::die debugger::get_function_from_pc(uint64_t pc)
+{
+    // 普通函数
+    for(auto &cu : m_dwarf.compilation_units())//遍历所有编译单元
+    {
+        if(die_pc_range(cu.root()).contains(pc))
+        {
+            for(const auto& die : cu.root())
+            {
+                if(die.tag == dwarf::DW_TAG::subprogram)////遍历所有die中的函数
+                {
+                    if(die_pc_range(die).contains(pc))
+                    {
+                        return die;
+                    }
+                }
+            }
+        }
+    }
+    throw std::out_of_range{"Cannot find function"};
+    // 内联函数
+
+    // 成员函数
+}
+
+// 特别处理sigtrap信号
+void debugger::handle_sigtrap(siginfo_t info)
+{
+    switch (info.si_code)
+    {
+    case SI_KERNEL:
+    case TRAP_BRKPT:
+    {
+        set_pc(get_pc()-1);//put the pc back where it should be
+        std::cout << "Hit breakpoint at address 0x"
+                << std::hex << get_pc() << std::endl;
+        // 获取当前地址偏移，以查询dwarf
+        auto offset_pc = offset_load_address(get_pc());
+        // 根据偏移pc得到.debug_line信息
+        auto line_entry = get_line_entry_from_pc(offset_pc);
+        // 打印源码上下文
+        print_source(line_entry->file->path, line_entry->line);
+        return;
+    }
+    // 如果信号是通过单步发送的，这将被设置
+    case TRAP_TRACE:
+        return;
+    default:
+        std::cout << "Unknown SIGTRAP code " << info.si_code << std::endl;
+        // break;
+        return;
+    }
+}
 
 void debugger::wait_for_signal()
 {
     int wait_status;
     auto options=0;
     waitpid(m_pid, &wait_status, options);
+
+    // 获取所收信号的信息结构体
+    auto siginfo = get_signal_info();
+
+    switch(siginfo.si_signo)
+    {
+        case SIGTRAP:
+            handle_sigtrap(siginfo);
+            break;
+        case SIGSEGV:
+            std::cout << "Yay, segfault. Reason: "
+                    << siginfo.si_code << std::endl;
+            break;
+        default:
+            std::cout << "Got signal " 
+                    << strsignal(siginfo.si_signo) << std::endl;
+    }
 }
 
 //步过：遇到函数不会进入函数单步执行，而是将函数执行完再停止
 void debugger::step_over_breakpoint()
 {
-    auto possible_breakpoint_location = get_pc() -1;//pc是下一条指令，-1得到当前指令
+    
+    // auto possible_breakpoint_location = get_pc() -1;//pc是下一条指令，-1得到当前指令
 
-    if(m_breakpoints.count(possible_breakpoint_location))//在断点hashmap查找当前位置是否有下断点
+    if(m_breakpoints.count(get_pc()))//在断点hashmap查找当前位置是否有下断点
     {
-        auto& bp = m_breakpoints[possible_breakpoint_location];//获取该断点对象
+        auto& bp = m_breakpoints[get_pc()];//获取该断点对象
 
         if(bp.is_enabled())
         {
-            auto previous_instruction_address = possible_breakpoint_location;
-            set_pc(previous_instruction_address);//让pc指向当前已经执行过的指令
+            // auto previous_instruction_address = possible_breakpoint_location;
+            // set_pc(previous_instruction_address);//让pc指向当前已经执行过的指令
 
             bp.disable();//禁用该断点，这样程序才能执行过去
             ptrace(PTRACE_SINGLESTEP, m_pid, nullptr, nullptr);//让OS重启子进程，当子进程执行了下一条指令再停止，并通知父进程
@@ -173,11 +328,36 @@ void debugger::set_breakpoint_at_address(std::intptr_t addr)
         m_breakpoints[addr] = bp;
     }
 
+//加载受控程序基地址
+void debugger::initialise_load_address()
+{
+    // 如果程序是动态链接的
+    if(m_elf.get_hdr().type == elf::et::dyn)
+    {
+        // 可以在/proc/pid/maps中找到加载地址
+        std::ifstream map("/proc" + std::to_string(m_pid) + "/maps");
+
+        // 开始读取
+        std::string addr;
+        std::getline(map, addr, '-');
+        //多行取map文件输入流，直到遇到分隔符
+        // 相当于读取第一个地址
+
+        m_load_address = std::stoi(addr, 0, 16);
+    }
+}
+
+
 void debugger::run()
 {
-    int wait_status;
-    auto options=0;
-    waitpid(m_pid, &wait_status, options);//暂停当前进程，直到有信号来，返回值放在wait_status
+    // int wait_status;
+    // auto options=0;
+    // waitpid(m_pid, &wait_status, options);//暂停当前进程，直到有信号来，返回值放在wait_status
+    wait_for_signal();
+
+    // 对于可能开启了PIE的程序，需要先查找程序的加载基地址
+    // 再将PC偏移加上基地址，得到真实地址
+    initialise_load_address();
 
     char* line = 0;
     while((line = linenoise("Wendydbg> ")) != 0)//监听并得到用户输入

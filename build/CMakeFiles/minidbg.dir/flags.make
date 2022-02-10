@@ -3,13 +3,13 @@
 
 # compile C with /usr/bin/x86_64-linux-gnu-gcc-5
 # compile CXX with /usr/bin/x86_64-linux-gnu-g++-5
-C_FLAGS =   -std=c++14
+C_FLAGS = -g   -std=c++14
 
 C_DEFINES = 
 
 C_INCLUDES = -I/home/wendy/Desktop/WendyDebugger/ext/libelfin -I/home/wendy/Desktop/WendyDebugger/ext/linenoise -I/home/wendy/Desktop/WendyDebugger/include 
 
-CXX_FLAGS =   -std=c++14
+CXX_FLAGS = -g   -std=c++14
 
 CXX_DEFINES = 
 

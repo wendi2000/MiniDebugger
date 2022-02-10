@@ -1,0 +1,7 @@
+/home/wendy/Desktop/WendyDebugger/CMakeFiles/edit_cache.dir
+/home/wendy/Desktop/WendyDebugger/CMakeFiles/rebuild_cache.dir
+/home/wendy/Desktop/WendyDebugger/CMakeFiles/libelfin.dir
+/home/wendy/Desktop/WendyDebugger/CMakeFiles/hello.dir
+/home/wendy/Desktop/WendyDebugger/CMakeFiles/minidbg.dir
+/home/wendy/Desktop/WendyDebugger/CMakeFiles/unwinding.dir
+/home/wendy/Desktop/WendyDebugger/CMakeFiles/variable.dir
