@@ -5,6 +5,11 @@ CMakeFiles/minidbg.dir/ext/linenoise/linenoise.c.o
  /home/wendy/Desktop/WendyDebugger/ext/linenoise/linenoise.c
  /home/wendy/Desktop/WendyDebugger/ext/linenoise/linenoise.h
 CMakeFiles/minidbg.dir/src/minidbg.cpp.o
+ ../ext/libelfin/dwarf/data.hh
+ ../ext/libelfin/dwarf/dwarf++.hh
+ ../ext/libelfin/dwarf/small_vector.hh
+ ../ext/libelfin/elf/common.hh
+ ../ext/libelfin/elf/elf++.hh
  ../ext/linenoise/linenoise.h
  ../include/breakpoint.hpp
  ../include/debugger.hpp

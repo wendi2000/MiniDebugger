@@ -25,6 +25,155 @@
 
 using namespace minidbg;
 
+// 步过
+void debugger::step_over()
+{
+    //根据PC地址偏移检索dwarf信息条目得到函数die
+    auto func = get_function_from_pc(get_offset_pc());
+    // at_low_pc 和 at_high_pc 是来自 libelfin 的函数，
+    // 它们将为我们提供给定函数 DIE 的低 PC 值和高 PC 值。
+    auto func_entry = at_low_pc(func);
+    auto func_end = at_high_pc(func);
+
+    // 子函数起始行
+    auto line = get_line_entry_from_pc(func_entry);
+    // 当前所在行
+    auto start_line = get_line_entry_from_pc(get_offset_pc());
+
+    // intptr_t 和uintptr_t 在不同平台上不一样，
+    // 始终与地址位数相同，用来存放地址，以此保证平台的通用性
+    std::vector<std::intptr_t> to_delete{};//我们需要删除我们设置的任何断点
+
+    // 为了设置所有的断点，我们循环遍历行表条目，直到我们碰到一个超出函数范围的断点。
+    while(line->address < func_end)
+    {
+        auto load_address = offset_dwarf_address(line->address);
+        // 对于每一个，我们确保它不是我们当前所在的行，并且在该位置还没有设置断点
+        if(line->address != start_line->address 
+            && !m_breakpoints.count(load_address))
+            {
+                set_breakpoint_at_address(load_address);
+                to_delete.push_back(load_address);
+            }
+        ++line;
+    }
+
+    // 获取受控进程的rbp值,进而读取栈中返回地址
+    auto frame_pointer = get_register_value(m_pid, reg::rbp);
+    auto return_address = read_memory(frame_pointer+8);
+    // 在返回地址设置断点
+    if(!m_breakpoints.count(return_address))
+    {
+        set_breakpoint_at_address(return_address);
+        to_delete.push_back(return_address);
+    }
+
+    // 继续执行，直到其中一个断点被命中，然后删除我们设置的所有临时断点。
+    continue_execution();
+
+    for(auto addr : to_delete)
+    {
+        remove_breakpoint(addr);
+    }
+
+
+
+
+}
+
+
+// 根据偏移地址，返回真实地址
+u_int64_t debugger::offset_dwarf_address(u_int64_t addr)
+{
+    return addr + m_load_address;
+}
+
+// 获取当前pc地址偏移
+u_int64_t debugger::get_offset_pc()
+{
+    return offset_load_address(get_pc());
+}
+
+// 步进
+void debugger::step_in()
+{
+    // 获取当前pc偏移值，去.debug_line查找得到结构体对象指针
+    // 使用→解引用访问line成员
+    auto line = get_line_entry_from_pc(get_offset_pc())->line;
+
+    // 一行源码语句可能对应多个汇编指令，我们要实现源码级别步进
+    // 因此要把一行源码语句包含的所有汇编指令都单步执行完
+    while(get_line_entry_from_pc(get_offset_pc())->line == line)
+    {
+        single_step_instruction_with_breakpoint_check();
+    }
+    // 此时到达了新的一行源码语句
+    // 获取该行调试信息，并打印输出，完成一个步进操作
+    auto line_entry = get_line_entry_from_pc(get_offset_pc());
+    print_source(line_entry->file->path, line_entry->line);
+
+}
+//去除一个地址的断点
+void debugger::remove_breakpoint(std::intptr_t addr)
+{
+    // 断点对象关闭
+    if(m_breakpoints.at(addr).is_enabled())
+    {
+        m_breakpoints.at(addr).disable();
+    }
+    // 断点记录map清除相应条目
+    m_breakpoints.erase(addr);
+}
+
+// 跳出： 当单步执行到子函数内时，
+// 用step out就可以执行完子函数余下部分，并返回到上一层函数。
+void debugger::step_out()
+{
+    // 获取受控进程的栈底指针值
+    auto frame_pointer = get_register_value(m_pid, reg::rbp);
+    // 32bits程序的rbp+8就是返回地址
+    auto return_address = read_memory(frame_pointer + 8);
+
+    bool should_remove_breakpoint = false;
+    if(!m_breakpoints.count(return_address))//如果返回地址处没有开启断点，就开启
+    {
+        set_breakpoint_at_address(return_address);
+        should_remove_breakpoint = true;
+    }
+
+    // 继续执行完整个子函数，停在返回地址
+    continue_execution();
+
+    // 记得把放在返回地址的断点去除
+    if(should_remove_breakpoint)
+    {
+        remove_breakpoint(return_address);
+    }
+    
+}
+
+
+// 可复用单步指令
+void debugger::single_step_instruction()
+{
+    ptrace(PTRACE_SINGLESTEP, m_pid, nullptr, nullptr);
+    wait_for_signal();
+}
+// 带断点检查的单步指令
+void debugger::single_step_instruction_with_breakpoint_check()
+{
+    // 首先检查我们是否需要开启或禁用断点
+    if(m_breakpoints.count(get_pc()))
+    {
+        step_over_breakpoint();//有开启的断点则步过断点
+    }
+    else
+    {
+        single_step_instruction();//否则使用通用步过
+    }
+
+}
+
 // ptrace获取信号信息，如产生原因，返回存储相关信息的结构体
 siginfo_t debugger::get_signal_info()
 {
@@ -104,7 +253,7 @@ dwarf::line_table::iterator debugger::get_line_entry_from_pc(uint64_t pc)
     throw std::out_of_range{"cannot find line entry"};
 }
 
-//根据PC检索dwarf信息条目得到函数die
+//根据PC地址偏移检索dwarf信息条目得到函数die
 dwarf::die debugger::get_function_from_pc(uint64_t pc)
 {
     // 普通函数
@@ -313,6 +462,25 @@ void debugger::handle_command(const std::string& line)
             };
             write_memory(std::stol(addr, 0, 16), std::stol(val, 0, 16));
         }
+    }
+    else if(is_prefix(command, "stepi"))
+    {
+        single_step_instruction_with_breakpoint_check();
+        // 步过后自动根据PC查询DWARF，输出源码上下文
+        auto line_entry = get_line_entry_from_pc(get_pc());
+        print_source(line_entry->file->path, line_entry->line);
+    }
+    else if(is_prefix(command, "step"))
+    {
+        step_in();
+    }
+    else if(is_prefix(command, "next"))
+    {
+        step_over();
+    }
+    else if(is_prefix(command, "finish"))
+    {
+        step_out();
     }
     else
     {
