@@ -8,22 +8,124 @@
 #include <vector>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
+#include <sys/personality.h>
 #include <unistd.h>
 #include <sstream>
+#include <fstream>
 #include <iostream>
 #include <iomanip>
-#include <fstream>
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+
 
 #include "linenoise.h"
 
 #include "debugger.hpp"
 #include "registers.hpp"
-#include <sys/personality.h>
 
 using namespace minidbg;
+
+// 在从libelfin获得的符号类型和我们的枚举之间进行映射
+symbol_type to_symbol_type(elf::stt sym)
+{
+    switch (sym)
+    {
+        case elf::stt::notype: return symbol_type::notype;
+        case elf::stt::object: return symbol_type::object;
+        case elf::stt::func: return symbol_type::func;
+        case elf::stt::section: return symbol_type::section;
+        case elf::stt::file: return symbol_type::file;
+        default: return symbol_type::notype;
+    }
+};
+
+// 查找符号
+std::vector<symbol> debugger::lookup_symbol(const std::string& name)
+{
+    std::vector<symbol> syms;
+
+    for(auto &sec : m_elf.sections())
+    {
+        if(sec.get_hdr().type != elf::sht::symtab
+        && sec.get_hdr().type != elf::sht::dynsym)
+            continue;
+        
+        for(auto sym : sec.as_symtab())
+        {
+            if(sym.get_name() == name)
+            {
+                auto &d = sym.get_data();
+                syms.push_back(symbol{
+                    to_symbol_type(d.type()),
+                    sym.get_name(),
+                    d.value
+                    });
+            } 
+        }
+    }
+    return syms;
+}
+
+// 判断s是不是of的后缀
+bool is_suffix(const std::string& s, const std::string& of)
+{
+
+    // s="aab" of ="ccffeaab" diff = 5   aab==aab
+    if(s.size() > of.size()) return false;
+    auto diff = of.size() - s.size();
+    return std::equal(s.begin(), s.end(), of.begin() + diff);
+
+}
+
+// 在源码行上设置断点
+void debugger::set_breakpoint_at_source_line(const std::string& file, unsigned line)
+{
+    // 在多个文件（多个编译单元）中，根据后缀匹配选出自己想要下断点的文件
+    for(const auto& cu : m_dwarf.compilation_units())
+    {
+        if(is_suffix(file, at_name(cu.root())))
+        {
+            const auto& lt = cu.get_line_table();
+            // 获取行表，并编译其中条目
+            for(const auto& entry : lt)
+            {
+                // entry.is_stmt 检查行表条目是否被标记为语句的开头，
+                // 该语句由编译器设置在它认为是断点的最佳目标的地址上。
+                if(entry.is_stmt && entry.line == line)
+                {
+                    set_breakpoint_at_address(offset_dwarf_address(entry.address));
+                    return;
+                }
+            }
+        }
+    }
+}
+
+
+// 在函数名（源码级）上设置断点
+void debugger::set_breakpoint_at_function(const std::string& name)
+{
+    // 与之前的算法类似
+    // 遍历所有编译单元的所有函数die
+    for(const auto &cu : m_dwarf.compilation_units())
+    {
+        for(const auto& die : cu.root())
+        {
+            // 
+            if(die.has(dwarf::DW_AT::name) && at_name(die) == name)
+            {
+                // at_low_pc 和 at_high_pc 是来自 libelfin 的函数，
+                // 它们将为我们提供给定函数 DIE 的低 PC 值和高 PC 值。
+                auto low_pc = at_low_pc(die);
+                auto entry = get_line_entry_from_pc(low_pc);
+                ++entry;//跳过函数序言（prologue）．直接到用户代码起始地址
+                set_breakpoint_at_address(offset_dwarf_address(entry->address));
+            }
+        }
+    }
+}
 
 // 步过
 void debugger::step_over()
@@ -75,9 +177,6 @@ void debugger::step_over()
     {
         remove_breakpoint(addr);
     }
-
-
-
 
 }
 
@@ -332,7 +431,7 @@ void debugger::wait_for_signal()
     }
 }
 
-//步过：遇到函数不会进入函数单步执行，而是将函数执行完再停止
+//步过断点：遇到函数不会进入函数单步执行，而是将函数执行完再停止
 void debugger::step_over_breakpoint()
 {
     
@@ -380,7 +479,7 @@ void debugger::write_memory(uint64_t address, uint64_t value)
     ptrace(PTRACE_POKEDATA, m_pid, address, value);
 }
 
-//输出所有的寄存器
+//打印所有的寄存器
 void debugger::dump_registers()
 {
 	for(const auto& rd: g_register_descriptors)//全局变量
@@ -425,8 +524,26 @@ void debugger::handle_command(const std::string& line)
     }
     else if(is_prefix(command, "break"))
     {
-        std::string addr{args[1],2};//从args[1]的第2索引开始取值（相当于删除字符串前两个字符0x）
-        set_breakpoint_at_address(std::stol(addr,0,16));//地址格式由字符串转16进制数
+        // std::string addr{args[1],2};//从args[1]的第2索引开始取值（相当于删除字符串前两个字符0x）
+        // set_breakpoint_at_address(std::stol(addr,0,16));//地址格式由字符串转16进制数
+
+        //break 0xdeadbeef　内存地址设置断点
+        if(args[1][0] == '0' && args[1][1] == 'x')
+        {
+            std::string addr{args[1], 2};
+            set_breakpoint_at_address(std::stol(addr, 0, 16));
+        }
+        // break <行号>:<文件名> 在源码行设置断点
+        else if(args[1].find(':') != std::string::npos)//find函数在找不到指定值得情况下会返回string::npos
+        {
+            auto file_and_line = split(args[1], ':');
+            set_breakpoint_at_source_line(file_and_line[0], std::stoi(file_and_line[1]));
+        }
+        // break 函数名 在函数名设置断点
+        else
+        {
+            set_breakpoint_at_function(args[1]);
+        }   
     }
     else if(is_prefix(command, "register"))
     {
@@ -482,6 +599,16 @@ void debugger::handle_command(const std::string& line)
     {
         step_out();
     }
+    // symbol 符号名
+    else if(is_prefix(command, "symbol"))
+    {
+        //返回所有符合的符号结构体变量
+        auto syms = lookup_symbol(args[1]);
+        for(auto&& s : syms)
+        {
+            std::cout << s.name << ' ' << to_string(s.type) << " 0x" << std::hex << s.addr << std::endl;
+        }
+    }
     else
     {
         std::cerr << "Unknown command\n";
@@ -489,12 +616,12 @@ void debugger::handle_command(const std::string& line)
 }
 
 void debugger::set_breakpoint_at_address(std::intptr_t addr)
-    {
-        std::cout << "Set breakpoint at address 0x" << std::hex << addr << std::endl;
-        breakpoint bp(m_pid, addr);
-        bp.enable();
-        m_breakpoints[addr] = bp;
-    }
+{
+    std::cout << "Set breakpoint at address 0x" << std::hex << addr << std::endl;
+    breakpoint bp(m_pid, addr);
+    bp.enable();
+    m_breakpoints[addr] = bp;
+}
 
 //加载受控程序基地址
 void debugger::initialise_load_address()

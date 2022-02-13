@@ -13,6 +13,34 @@
 #include "elf/elf++.hh"
 
 namespace minidbg{
+    enum class symbol_type
+    {
+        notype,     //No type
+        object,     //数据对象
+        func,       //函数入口点
+        section,    //与段相关联的符号
+        file,       //源文件
+    };
+
+    std::string to_string(symbol_type st)
+    {
+        switch (st)
+        {
+        case symbol_type::notype: return "notype";
+        case symbol_type::object: return "object";
+        case symbol_type::func: return "func";
+        case symbol_type::section: return "section";
+        case symbol_type::file: return "file";
+        }
+    }
+
+    struct symbol
+    {
+        symbol_type type;
+        std::string name;
+        std::uintptr_t addr;
+    };
+
     class debugger
     {
         public:
@@ -27,10 +55,14 @@ namespace minidbg{
                
             void run();
 
-            // 在一个地址设置断点
+            // 在内存地址上设置断点
             void set_breakpoint_at_address(std::intptr_t addr);
             //去除一个地址的断点
             void remove_breakpoint(std::intptr_t addr);
+            // 在函数名上设置断点
+            void set_breakpoint_at_function(const std::string& name);
+            // 在源码行上设置断点
+            void set_breakpoint_at_source_line(const std::string& file, unsigned line);
 
             // 打印出所有寄存器
             void dump_registers();
@@ -44,6 +76,9 @@ namespace minidbg{
             void continue_execution();
             auto get_pc()-> uint64_t;
             void set_pc(uint64_t pc);
+
+            // 查找符号
+            std::vector<symbol> lookup_symbol(const std::string& name);
 
             void step_over_breakpoint();
             // 跳出

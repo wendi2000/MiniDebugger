@@ -95,19 +95,23 @@ sys/ptrace.h
 -
 sys/wait.h
 -
+sys/personality.h
+-
 unistd.h
 -
 sstream
+-
+fstream
 -
 iostream
 -
 iomanip
 -
-fstream
--
 sys/types.h
 -
 sys/stat.h
+-
+fcntl.h
 -
 linenoise.h
 /home/wendy/Desktop/WendyDebugger/src/linenoise.h
@@ -115,6 +119,4 @@ debugger.hpp
 /home/wendy/Desktop/WendyDebugger/src/debugger.hpp
 registers.hpp
 /home/wendy/Desktop/WendyDebugger/src/registers.hpp
-sys/personality.h
--
 
